@@ -11,9 +11,6 @@
 //! When using this crate do not forget to enable `aes` target feature,
 //! otherwise you will get an empty crate. You can do it either by using
 //! `RUSTFLAGS="-C target-feature=+aes"` or by editing your `.cargo/config`.
-//! Alternatively you can enable `ignore_target_feature_check` crate feature
-//! which will bypass target feature check, but it will have a negative implact
-//! on performance.
 //!
 //! This crate currently requires nigthly Rust compiler due to the
 //! usage of unstable `cfg_target_feature` and `stdsimd` features.
@@ -62,6 +59,9 @@ fn aes_key_expand_128(round_keys: &mut RoundKeys, mut t: __m128i) {
     round_keys[10] = t;
 }
 
+/// A fast-key-erasure random-number generator using AES-NI.
+///
+/// This is designed to fill large buffers quickly with random data.
 #[repr(align(16))]
 pub struct AesRng {
     round_keys: RoundKeys,
@@ -83,7 +83,8 @@ macro_rules! compute_rounds {
 }
 
 impl AesRng {
-    pub fn fill(&mut self, buf: &mut [u8]) {
+    /// Fill the given buffer with random data.
+    pub fn fill(&mut self, buffer: &mut [u8]) {
         let zero = unsafe { _mm_set_epi64x(0, 0) };
         let one = unsafe { _mm_set_epi64x(0, 1) };
         let two = unsafe { _mm_set_epi64x(0, 2) };
@@ -92,8 +93,8 @@ impl AesRng {
         let mut s = [zero; 8];
 
         c[0] = self.counter;
-        let mut remaining = buf.len();
-        let mut buf = buf.as_mut_ptr();
+        let mut remaining = buffer.len();
+        let mut buffer = buffer.as_mut_ptr();
         while remaining > 128 {
             unsafe {
                 c[1] = _mm_add_epi64(c[0], one);
@@ -114,15 +115,15 @@ impl AesRng {
             compute_rounds!(7, c, r, s, self.round_keys);
             unsafe {
                 c[0] = _mm_add_epi64(c[7], one);
-                _mm_storeu_si128(buf.offset(0) as *mut __m128i, r[0]);
-                _mm_storeu_si128(buf.offset(16) as *mut __m128i, r[1]);
-                _mm_storeu_si128(buf.offset(32) as *mut __m128i, r[2]);
-                _mm_storeu_si128(buf.offset(48) as *mut __m128i, r[3]);
-                _mm_storeu_si128(buf.offset(64) as *mut __m128i, r[4]);
-                _mm_storeu_si128(buf.offset(80) as *mut __m128i, r[5]);
-                _mm_storeu_si128(buf.offset(96) as *mut __m128i, r[6]);
-                _mm_storeu_si128(buf.offset(112) as *mut __m128i, r[7]);
-                buf = buf.offset(128);
+                _mm_storeu_si128(buffer.offset(0) as *mut __m128i, r[0]);
+                _mm_storeu_si128(buffer.offset(16) as *mut __m128i, r[1]);
+                _mm_storeu_si128(buffer.offset(32) as *mut __m128i, r[2]);
+                _mm_storeu_si128(buffer.offset(48) as *mut __m128i, r[3]);
+                _mm_storeu_si128(buffer.offset(64) as *mut __m128i, r[4]);
+                _mm_storeu_si128(buffer.offset(80) as *mut __m128i, r[5]);
+                _mm_storeu_si128(buffer.offset(96) as *mut __m128i, r[6]);
+                _mm_storeu_si128(buffer.offset(112) as *mut __m128i, r[7]);
+                buffer = buffer.offset(128);
             }
             remaining -= 128;
         }
@@ -132,9 +133,9 @@ impl AesRng {
             compute_rounds!(1, c, r, s, self.round_keys);
             unsafe {
                 c[0] = _mm_add_epi64(c[1], one);
-                _mm_storeu_si128(buf.offset(0) as *mut __m128i, r[0]);
-                _mm_storeu_si128(buf.offset(16) as *mut __m128i, r[1]);
-                buf = buf.offset(32);
+                _mm_storeu_si128(buffer.offset(0) as *mut __m128i, r[0]);
+                _mm_storeu_si128(buffer.offset(16) as *mut __m128i, r[1]);
+                buffer = buffer.offset(32);
             }
             remaining -= 32;
         }
@@ -142,8 +143,8 @@ impl AesRng {
             compute_rounds!(0, c, r, s, self.round_keys);
             unsafe {
                 c[0] = _mm_add_epi64(c[0], one);
-                _mm_storeu_si128(buf as *mut __m128i, r[0]);
-                buf = buf.offset(16);
+                _mm_storeu_si128(buffer as *mut __m128i, r[0]);
+                buffer = buffer.offset(16);
             }
             remaining -= 16;
         }
@@ -156,7 +157,7 @@ impl AesRng {
                 c[0] = _mm_add_epi64(c[0], one);
                 _mm_storeu_si128(t as *mut __m128i, r[0]);
                 for i in 0..remaining {
-                    buf.add(i).write(t.add(i).read());
+                    buffer.add(i).write(t.add(i).read());
                 }
             }
         }
@@ -167,7 +168,8 @@ impl AesRng {
         aes_key_expand_128(&mut self.round_keys, r[0]);
     }
 
-    pub fn new(seed: [u8; SEEDBYTES]) -> AesRng {
+    /// Create a new `AesRng` using the given seed.
+    pub fn from_seed(seed: [u8; SEEDBYTES]) -> AesRng {
         let zero = unsafe { _mm_set_epi64x(0, 0) };
         let mut round_keys: RoundKeys = [zero; ROUNDS + 1];
         let key = seed.as_ptr() as *const __m128i;
@@ -198,9 +200,10 @@ mod tests {
     }
 
     #[test]
-    fn new() {
-        let rng = AesRng::new([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-                                   0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    fn from_seed() {
+        let rng = AesRng::from_seed(
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
         {
             let mut hex = String::new();
             for key in rng.round_keys.iter() {
@@ -225,8 +228,9 @@ mod tests {
 
     #[test]
     fn fill() {
-        let mut rng = AesRng::new([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-                                   0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+        let mut rng = AesRng::from_seed(
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
 
         let mut buf = vec![0; 200];
         rng.fill(&mut buf);
