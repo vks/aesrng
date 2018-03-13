@@ -9,13 +9,16 @@ CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 # aesrng
 
-Rust port of https://github.com/jedisct1/aes-stream.
+A fast-key-erasure random-number generator using the AES-NI instruction set,
+designed to fill large buffer with random bytes.
+
+It was ported from a [C implementation](https://github.com/jedisct1/aes-stream).
 
 
 ## Compilation
 
-This crate requires a CPU supporting the AES-NI instructions. To allow Rust to
-use these instructions, the following flags are recommended:
+A CPU supporting the AES-NI instructions is required. To allow Rust to use these
+instructions, the following flags are recommended:
 
 ```
 RUSTFLAGS='-C target-feature=+aes -C target-cpu=native'
