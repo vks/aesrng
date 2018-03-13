@@ -28,4 +28,4 @@ This only works with a nightly version of Rust.
 
 Performance is comparable to the fastest non-crypto RNGs:
 
-![][violin.svg]
+![](violin.svg)
