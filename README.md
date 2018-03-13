@@ -29,6 +29,8 @@ This only works with a nightly version of Rust.
 
 ## Performance
 
-Performance is comparable to the fastest non-crypto RNGs:
+Performance is comparable to the fastest non-crypto RNGs. Here is a comparison
+with [xoroshiro](https://github.com/vks/xoroshiro) when generating 100 MiB of
+random data:
 
 ![](violin.svg)
