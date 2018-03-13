@@ -11,6 +11,7 @@ CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 Rust port of https://github.com/jedisct1/aes-stream.
 
+
 ## Compilation
 
 This crate requires a CPU supporting the AES-NI instructions. To allow Rust to
@@ -21,3 +22,10 @@ RUSTFLAGS='-C target-feature=+aes -C target-cpu=native'
 ```
 
 This only works with a nightly version of Rust.
+
+
+## Performance
+
+Performance is comparable to the fastest non-crypto RNGs:
+
+![][violin.svg]
