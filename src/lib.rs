@@ -30,10 +30,10 @@ use std::arch::x86::*;
 use std::arch::x86_64::*;
 
 // This is for AES128. AES256 is not implemented for now.
-const AES_STREAM_ROUNDS: usize = 10;
-const AES_STREAM_SEEDBYTES: usize = 32;
+const ROUNDS: usize = 10;
+const SEEDBYTES: usize = 32;
 
-type RoundKeys = [__m128i; AES_STREAM_ROUNDS + 1];
+type RoundKeys = [__m128i; ROUNDS + 1];
 
 macro_rules! drc {
     ($round:expr, $rc:expr, $s:ident, $t:ident, $round_keys:expr) => (
@@ -68,7 +68,7 @@ pub struct AesRng {
     counter: __m128i,
 }
 
-macro_rules! compute_aes_stream_rounds {
+macro_rules! compute_rounds {
     ($n:expr, $c:ident, $r:ident, $s:ident, $round_keys:expr) => (
         unsafe {
             $r[$n] = _mm_aesenc_si128(_mm_xor_si128($c[$n], $round_keys[0]), $round_keys[1]);
@@ -104,14 +104,14 @@ impl AesRng {
                 c[6] = _mm_add_epi64(c[4], two);
                 c[7] = _mm_add_epi64(c[6], one);
             }
-            compute_aes_stream_rounds!(0, c, r, s, self.round_keys);
-            compute_aes_stream_rounds!(1, c, r, s, self.round_keys);
-            compute_aes_stream_rounds!(2, c, r, s, self.round_keys);
-            compute_aes_stream_rounds!(3, c, r, s, self.round_keys);
-            compute_aes_stream_rounds!(4, c, r, s, self.round_keys);
-            compute_aes_stream_rounds!(5, c, r, s, self.round_keys);
-            compute_aes_stream_rounds!(6, c, r, s, self.round_keys);
-            compute_aes_stream_rounds!(7, c, r, s, self.round_keys);
+            compute_rounds!(0, c, r, s, self.round_keys);
+            compute_rounds!(1, c, r, s, self.round_keys);
+            compute_rounds!(2, c, r, s, self.round_keys);
+            compute_rounds!(3, c, r, s, self.round_keys);
+            compute_rounds!(4, c, r, s, self.round_keys);
+            compute_rounds!(5, c, r, s, self.round_keys);
+            compute_rounds!(6, c, r, s, self.round_keys);
+            compute_rounds!(7, c, r, s, self.round_keys);
             unsafe {
                 c[0] = _mm_add_epi64(c[7], one);
                 _mm_storeu_si128(buf.offset(0) as *mut __m128i, r[0]);
@@ -128,8 +128,8 @@ impl AesRng {
         }
         while remaining > 32 {
             c[1] = unsafe { _mm_add_epi64(c[0], one) };
-            compute_aes_stream_rounds!(0, c, r, s, self.round_keys);
-            compute_aes_stream_rounds!(1, c, r, s, self.round_keys);
+            compute_rounds!(0, c, r, s, self.round_keys);
+            compute_rounds!(1, c, r, s, self.round_keys);
             unsafe {
                 c[0] = _mm_add_epi64(c[1], one);
                 _mm_storeu_si128(buf.offset(0) as *mut __m128i, r[0]);
@@ -139,7 +139,7 @@ impl AesRng {
             remaining -= 32;
         }
         while remaining > 16 {
-            compute_aes_stream_rounds!(0, c, r, s, self.round_keys);
+            compute_rounds!(0, c, r, s, self.round_keys);
             unsafe {
                 c[0] = _mm_add_epi64(c[0], one);
                 _mm_storeu_si128(buf as *mut __m128i, r[0]);
@@ -148,7 +148,7 @@ impl AesRng {
             remaining -= 16;
         }
         if remaining > 0 {
-            compute_aes_stream_rounds!(0, c, r, s, self.round_keys);
+            compute_rounds!(0, c, r, s, self.round_keys);
             unsafe {
                 #[repr(align(16))]
                 let mut t: [u8; 16] = std::mem::uninitialized();
@@ -163,13 +163,13 @@ impl AesRng {
         self.counter = c[0];
 
         c[0] = unsafe { _mm_xor_si128(c[0], _mm_set_epi64x(1 << 63, 0)) };
-        compute_aes_stream_rounds!(0, c, r, s, self.round_keys);
+        compute_rounds!(0, c, r, s, self.round_keys);
         aes_key_expand_128(&mut self.round_keys, r[0]);
     }
 
-    pub fn new(seed: [u8; AES_STREAM_SEEDBYTES]) -> AesRng {
+    pub fn new(seed: [u8; SEEDBYTES]) -> AesRng {
         let zero = unsafe { _mm_set_epi64x(0, 0) };
-        let mut round_keys: RoundKeys = [zero; AES_STREAM_ROUNDS + 1];
+        let mut round_keys: RoundKeys = [zero; ROUNDS + 1];
         let key = seed.as_ptr() as *const __m128i;
         let counter = unsafe { seed.as_ptr().offset(16) } as *const __m128i;
 
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn size() {
-        assert_eq!(std::mem::size_of::<AesRng>(), (AES_STREAM_ROUNDS + 1) * 16 + 16);
+        assert_eq!(std::mem::size_of::<AesRng>(), (ROUNDS + 1) * 16 + 16);
     }
 
     #[test]
