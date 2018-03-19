@@ -10,7 +10,7 @@ version = "0.1.0"
 
 [[bench]]
 harness = false
-name = "fill"
+name = "rngs"
 
 [dev-dependencies]
 criterion = "0.2"
