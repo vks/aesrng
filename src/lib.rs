@@ -17,7 +17,6 @@
 #![feature(cfg_target_feature)]
 #![feature(target_feature)]
 #![feature(stdsimd)]
-
 #![cfg(any(target_arch = "x86_64", target_arch = "x86"))]
 #![cfg(target_feature = "aes")]
 
@@ -184,7 +183,6 @@ impl AesRng {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::simd::u8x16;
@@ -201,9 +199,10 @@ mod tests {
 
     #[test]
     fn from_seed() {
-        let rng = AesRng::from_seed(
-            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+        let rng = AesRng::from_seed([
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            11, 12, 13, 14, 15,
+        ]);
         {
             let mut hex = String::new();
             for key in rng.round_keys.iter() {
@@ -228,9 +227,10 @@ mod tests {
 
     #[test]
     fn fill() {
-        let mut rng = AesRng::from_seed(
-            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+        let mut rng = AesRng::from_seed([
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            11, 12, 13, 14, 15,
+        ]);
 
         let mut buf = vec![0; 200];
         rng.fill(&mut buf);
