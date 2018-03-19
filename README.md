@@ -30,7 +30,10 @@ This only works with a nightly version of Rust.
 ## Performance
 
 Performance is comparable to the fastest non-crypto RNGs. Here is a comparison
-with [xoroshiro](https://github.com/vks/xoroshiro) when generating 100 MiB of
-random data:
+with [xoroshiro](https://github.com/vks/xoroshiro) and Rand's default RNG when
+generating 100 MiB of random data:
 
 ![](violin.svg)
+
+Note that this is not a fair comparison, because the other RNGs are not using
+explicit vectorization.
