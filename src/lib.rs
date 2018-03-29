@@ -20,10 +20,70 @@
 #![cfg(any(target_arch = "x86_64", target_arch = "x86"))]
 #![cfg(target_feature = "aes")]
 
+extern crate rand_core;
+
+use std::fmt;
+
+use rand_core::{BlockRngCore, CryptoRng, RngCore, SeedableRng, Error};
+use rand_core::impls::BlockRng;
+
 #[cfg(target_arch = "x86")]
 use std::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
+
+/// Trait for casting types to byte slices.
+pub trait AsByteSliceMut {
+    /// Return a mutable reference to self as a byte slice
+    fn as_byte_slice_mut<'a>(&'a mut self) -> &'a mut [u8];
+
+    /// Call `to_le` on each element (i.e. byte-swap on Big Endian platforms).
+    fn to_le(&mut self);
+}
+
+impl AsByteSliceMut for [u8] {
+    fn as_byte_slice_mut<'a>(&'a mut self) -> &'a mut [u8] {
+        self
+    }
+
+    fn to_le(&mut self) {}
+}
+
+macro_rules! impl_as_byte_slice {
+    ($t:ty) => {
+        impl AsByteSliceMut for [$t] {
+            fn as_byte_slice_mut<'a>(&'a mut self) -> &'a mut [u8] {
+                unsafe {
+                    ::std::slice::from_raw_parts_mut(&mut self[0]
+                        as *mut $t
+                        as *mut u8,
+                        self.len() * ::std::mem::size_of::<$t>()
+                    )
+                }
+            }
+
+            fn to_le(&mut self) {
+                for x in self {
+                    *x = x.to_le();
+                }
+            }
+        }
+    }
+}
+
+impl_as_byte_slice!(u32);
+
+const AESRNG_BUFSIZE: usize = 32;
+
+impl<T> AsByteSliceMut for [T; AESRNG_BUFSIZE] where [T]: AsByteSliceMut {
+    fn as_byte_slice_mut<'a>(&'a mut self) -> &'a mut [u8] {
+        self[..].as_byte_slice_mut()
+    }
+
+    fn to_le(&mut self) {
+        self[..].to_le()
+    }
+}
 
 // This is for AES128. AES256 is not implemented for now.
 const ROUNDS: usize = 10;
@@ -62,7 +122,8 @@ fn aes_key_expand_128(round_keys: &mut RoundKeys, mut t: __m128i) {
 ///
 /// This is designed to fill large buffers quickly with random data.
 #[repr(align(16))]
-pub struct AesRng {
+#[derive(Clone)]
+pub struct AesCore {
     round_keys: RoundKeys,
     counter: __m128i,
 }
@@ -81,8 +142,10 @@ macro_rules! compute_rounds {
     );
 }
 
-impl AesRng {
+impl AesCore {
     /// Fill the given buffer with random data.
+    ///
+    /// Erases the key after filling the buffer.
     pub fn fill(&mut self, buffer: &mut [u8]) {
         let zero = unsafe { _mm_set_epi64x(0, 0) };
         let one = unsafe { _mm_set_epi64x(0, 1) };
@@ -166,9 +229,13 @@ impl AesRng {
         compute_rounds!(0, c, r, s, self.round_keys);
         aes_key_expand_128(&mut self.round_keys, r[0]);
     }
+}
 
-    /// Create a new `AesRng` using the given seed.
-    pub fn from_seed(seed: [u8; SEEDBYTES]) -> AesRng {
+impl SeedableRng for AesCore {
+    type Seed = [u8; SEEDBYTES];
+
+    /// Create a new `AesCore` using the given seed.
+    fn from_seed(seed: [u8; SEEDBYTES]) -> AesCore {
         let zero = unsafe { _mm_set_epi64x(0, 0) };
         let mut round_keys: RoundKeys = [zero; ROUNDS + 1];
         let key = seed.as_ptr() as *const __m128i;
@@ -176,12 +243,74 @@ impl AesRng {
 
         aes_key_expand_128(&mut round_keys, unsafe { _mm_loadu_si128(key) });
 
-        AesRng {
+        AesCore {
             round_keys,
             counter: unsafe { _mm_loadu_si128(counter) },
         }
     }
 }
+
+// Custom Debug implementation that does not expose the internal state
+impl fmt::Debug for AesCore {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "AesCore {{}}")
+    }
+}
+
+impl BlockRngCore for AesCore {
+    type Item = u32;
+    type Results = [u32; AESRNG_BUFSIZE];
+
+    fn generate(&mut self, results: &mut Self::Results) {
+        self.fill(results.as_byte_slice_mut())
+    }
+}
+
+
+/// A fast-key-erasure random-number generator using AES-NI.
+///
+/// Internally, it uses a 128 byte buffer for generating integers. When the
+/// buffer is consumed, the key of the RNG is erased.
+///
+/// Using `fill`, `fill_bytes` or `try_fill_bytes` always erases the key after
+/// filling the buffer. This implies that `next_u32` and `next_u64` will not
+/// generate the same results.
+#[derive(Clone, Debug)]
+pub struct AesRng(BlockRng<AesCore>);
+
+impl RngCore for AesRng {
+    #[inline(always)]
+    fn next_u32(&mut self) -> u32 {
+        self.0.next_u32()
+    }
+
+    #[inline(always)]
+    fn next_u64(&mut self) -> u64 {
+        self.0.next_u64()
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        self.0.core.fill(dest)
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
+        Ok(self.0.core.fill(dest))
+    }
+}
+
+impl SeedableRng for AesRng {
+    type Seed = <AesCore as SeedableRng>::Seed;
+
+    fn from_seed(seed: Self::Seed) -> Self {
+        AesRng(BlockRng::<AesCore>::from_seed(seed))
+    }
+
+    fn from_rng<R: RngCore>(rng: R) -> Result<Self, Error> {
+        BlockRng::<AesCore>::from_rng(rng).map(|rng| AesRng(rng))
+    }
+}
+
+impl CryptoRng for AesRng {}
 
 #[cfg(test)]
 mod tests {
@@ -194,12 +323,12 @@ mod tests {
 
     #[test]
     fn size() {
-        assert_eq!(std::mem::size_of::<AesRng>(), (ROUNDS + 1) * 16 + 16);
+        assert_eq!(std::mem::size_of::<AesCore>(), (ROUNDS + 1) * 16 + 16);
     }
 
     #[test]
     fn from_seed() {
-        let rng = AesRng::from_seed([
+        let rng = AesCore::from_seed([
             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
             11, 12, 13, 14, 15,
         ]);
@@ -227,7 +356,7 @@ mod tests {
 
     #[test]
     fn fill() {
-        let mut rng = AesRng::from_seed([
+        let mut rng = AesCore::from_seed([
             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
             11, 12, 13, 14, 15,
         ]);
