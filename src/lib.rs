@@ -27,63 +27,15 @@ use std::fmt;
 use rand_core::{BlockRngCore, CryptoRng, RngCore, SeedableRng, Error};
 use rand_core::impls::BlockRng;
 
+mod byte_slice;
 #[macro_use]
 mod simd;
 
+use byte_slice::AsByteSliceMut;
 use simd::M128;
 
-/// Trait for casting types to byte slices.
-pub trait AsByteSliceMut {
-    /// Return a mutable reference to self as a byte slice
-    fn as_byte_slice_mut<'a>(&'a mut self) -> &'a mut [u8];
-
-    /// Call `to_le` on each element (i.e. byte-swap on Big Endian platforms).
-    fn to_le(&mut self);
-}
-
-impl AsByteSliceMut for [u8] {
-    fn as_byte_slice_mut<'a>(&'a mut self) -> &'a mut [u8] {
-        self
-    }
-
-    fn to_le(&mut self) {}
-}
-
-macro_rules! impl_as_byte_slice {
-    ($t:ty) => {
-        impl AsByteSliceMut for [$t] {
-            fn as_byte_slice_mut<'a>(&'a mut self) -> &'a mut [u8] {
-                unsafe {
-                    ::std::slice::from_raw_parts_mut(&mut self[0]
-                        as *mut $t
-                        as *mut u8,
-                        self.len() * ::std::mem::size_of::<$t>()
-                    )
-                }
-            }
-
-            fn to_le(&mut self) {
-                for x in self {
-                    *x = x.to_le();
-                }
-            }
-        }
-    }
-}
-
-impl_as_byte_slice!(u32);
 
 const AESRNG_BUFSIZE: usize = 32;
-
-impl<T> AsByteSliceMut for [T; AESRNG_BUFSIZE] where [T]: AsByteSliceMut {
-    fn as_byte_slice_mut<'a>(&'a mut self) -> &'a mut [u8] {
-        self[..].as_byte_slice_mut()
-    }
-
-    fn to_le(&mut self) {
-        self[..].to_le()
-    }
-}
 
 // This is for AES128. AES256 is not implemented for now.
 const ROUNDS: usize = 10;
@@ -142,6 +94,7 @@ impl AesCore {
     /// Fill the given buffer with random data.
     ///
     /// Erases the key after filling the buffer.
+    #[inline]
     pub fn fill(&mut self, buffer: &mut [u8]) {
         let zero = M128::from((0, 0));
         let one = M128::from((0, 1));
@@ -251,10 +204,23 @@ impl fmt::Debug for AesCore {
     }
 }
 
+impl<T> AsByteSliceMut for [T; AESRNG_BUFSIZE] where [T]: AsByteSliceMut {
+    #[inline]
+    fn as_byte_slice_mut<'a>(&'a mut self) -> &'a mut [u8] {
+        self[..].as_byte_slice_mut()
+    }
+
+    #[inline]
+    fn to_le(&mut self) {
+        self[..].to_le()
+    }
+}
+
 impl BlockRngCore for AesCore {
     type Item = u32;
     type Results = [u32; AESRNG_BUFSIZE];
 
+    #[inline]
     fn generate(&mut self, results: &mut Self::Results) {
         self.fill(results.as_byte_slice_mut())
     }
