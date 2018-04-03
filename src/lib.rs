@@ -27,10 +27,10 @@ use std::fmt;
 use rand_core::{BlockRngCore, CryptoRng, RngCore, SeedableRng, Error};
 use rand_core::impls::BlockRng;
 
-#[cfg(target_arch = "x86")]
-use std::arch::x86::*;
-#[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::*;
+#[macro_use]
+mod simd;
+
+use simd::M128;
 
 /// Trait for casting types to byte slices.
 pub trait AsByteSliceMut {
@@ -89,33 +89,43 @@ impl<T> AsByteSliceMut for [T; AESRNG_BUFSIZE] where [T]: AsByteSliceMut {
 const ROUNDS: usize = 10;
 const SEEDBYTES: usize = 32;
 
-type RoundKeys = [__m128i; ROUNDS + 1];
+type RoundKeys = [M128; ROUNDS + 1];
 
 macro_rules! drc {
     ($round:expr, $rc:expr, $s:ident, $t:ident, $round_keys:expr) => (
-        $s = _mm_aeskeygenassist_si128($t, $rc);
+        $s = keygenassist!($t, $rc);
         $round_keys[$round] = $t;
-        $t = _mm_xor_si128($t, _mm_slli_si128($t, 4));
-        $t = _mm_xor_si128($t, _mm_slli_si128($t, 8));
-        $t = _mm_xor_si128($t, _mm_shuffle_epi32($s, 0xff));
+        $t = $t ^ shiftl!($t, 4);
+        $t = $t ^ shiftl!($t, 8);
+        $t = $t ^ shuffle!($s, 0xff);
     );
 }
 
-fn aes_key_expand_128(round_keys: &mut RoundKeys, mut t: __m128i) {
-    let mut s: __m128i;
-    unsafe {
-        drc!(0, 1, s, t, round_keys);
-        drc!(1, 2, s, t, round_keys);
-        drc!(2, 4, s, t, round_keys);
-        drc!(3, 8, s, t, round_keys);
-        drc!(4, 16, s, t, round_keys);
-        drc!(5, 32, s, t, round_keys);
-        drc!(6, 64, s, t, round_keys);
-        drc!(7, 128, s, t, round_keys);
-        drc!(8, 27, s, t, round_keys);
-        drc!(9, 54, s, t, round_keys);
-    }
+fn aes_key_expand_128(round_keys: &mut RoundKeys, mut t: M128) {
+    let mut s: M128;
+    drc!(0, 1, s, t, round_keys);
+    drc!(1, 2, s, t, round_keys);
+    drc!(2, 4, s, t, round_keys);
+    drc!(3, 8, s, t, round_keys);
+    drc!(4, 16, s, t, round_keys);
+    drc!(5, 32, s, t, round_keys);
+    drc!(6, 64, s, t, round_keys);
+    drc!(7, 128, s, t, round_keys);
+    drc!(8, 27, s, t, round_keys);
+    drc!(9, 54, s, t, round_keys);
     round_keys[10] = t;
+}
+
+macro_rules! compute_rounds {
+    ($n:expr, $c:ident, $r:ident, $s:ident, $round_keys:expr) => (
+        $r[$n] = ($c[$n] ^ $round_keys[0]).encrypt($round_keys[1]);
+        $r[$n] = $r[$n].encrypt($round_keys[2]).encrypt($round_keys[3]);
+        $r[$n] = $r[$n].encrypt($round_keys[4]).encrypt($round_keys[5]);
+        $s[$n] = $r[$n];
+        $r[$n] = $r[$n].encrypt($round_keys[6]).encrypt($round_keys[7]);
+        $r[$n] = $r[$n].encrypt($round_keys[8]).encrypt($round_keys[9]);
+        $r[$n] = $s[$n] ^ $r[$n].encrypt_last($round_keys[10]);
+    );
 }
 
 /// A fast-key-erasure random-number generator using AES-NI.
@@ -125,21 +135,7 @@ fn aes_key_expand_128(round_keys: &mut RoundKeys, mut t: __m128i) {
 #[derive(Clone)]
 pub struct AesCore {
     round_keys: RoundKeys,
-    counter: __m128i,
-}
-
-macro_rules! compute_rounds {
-    ($n:expr, $c:ident, $r:ident, $s:ident, $round_keys:expr) => (
-        unsafe {
-            $r[$n] = _mm_aesenc_si128(_mm_xor_si128($c[$n], $round_keys[0]), $round_keys[1]);
-            $r[$n] = _mm_aesenc_si128(_mm_aesenc_si128($r[$n], $round_keys[2]), $round_keys[3]);
-            $r[$n] = _mm_aesenc_si128(_mm_aesenc_si128($r[$n], $round_keys[4]), $round_keys[5]);
-            $s[$n] = $r[$n];
-            $r[$n] = _mm_aesenc_si128(_mm_aesenc_si128($r[$n], $round_keys[6]), $round_keys[7]);
-            $r[$n] = _mm_aesenc_si128(_mm_aesenc_si128($r[$n], $round_keys[8]), $round_keys[9]);
-            $r[$n] = _mm_xor_si128($s[$n], _mm_aesenclast_si128($r[$n], $round_keys[10]));
-        }
-    );
+    counter: M128,
 }
 
 impl AesCore {
@@ -147,9 +143,9 @@ impl AesCore {
     ///
     /// Erases the key after filling the buffer.
     pub fn fill(&mut self, buffer: &mut [u8]) {
-        let zero = unsafe { _mm_set_epi64x(0, 0) };
-        let one = unsafe { _mm_set_epi64x(0, 1) };
-        let two = unsafe { _mm_set_epi64x(0, 2) };
+        let zero = M128::from((0, 0));
+        let one = M128::from((0, 1));
+        let two = M128::from((0, 2));
         let mut c = [zero; 8];
         let mut r = [zero; 8];
         let mut s = [zero; 8];
@@ -158,15 +154,13 @@ impl AesCore {
         let mut remaining = buffer.len();
         let mut buffer = buffer.as_mut_ptr();
         while remaining > 128 {
-            unsafe {
-                c[1] = _mm_add_epi64(c[0], one);
-                c[2] = _mm_add_epi64(c[0], two);
-                c[3] = _mm_add_epi64(c[2], one);
-                c[4] = _mm_add_epi64(c[2], two);
-                c[5] = _mm_add_epi64(c[4], one);
-                c[6] = _mm_add_epi64(c[4], two);
-                c[7] = _mm_add_epi64(c[6], one);
-            }
+            c[1] = c[0] + one;
+            c[2] = c[0] + two;
+            c[3] = c[2] + one;
+            c[4] = c[2] + two;
+            c[5] = c[4] + one;
+            c[6] = c[4] + two;
+            c[7] = c[6] + one;
             compute_rounds!(0, c, r, s, self.round_keys);
             compute_rounds!(1, c, r, s, self.round_keys);
             compute_rounds!(2, c, r, s, self.round_keys);
@@ -175,49 +169,49 @@ impl AesCore {
             compute_rounds!(5, c, r, s, self.round_keys);
             compute_rounds!(6, c, r, s, self.round_keys);
             compute_rounds!(7, c, r, s, self.round_keys);
+            c[0] = c[7] + one;
             unsafe {
-                c[0] = _mm_add_epi64(c[7], one);
-                _mm_storeu_si128(buffer.offset(0) as *mut __m128i, r[0]);
-                _mm_storeu_si128(buffer.offset(16) as *mut __m128i, r[1]);
-                _mm_storeu_si128(buffer.offset(32) as *mut __m128i, r[2]);
-                _mm_storeu_si128(buffer.offset(48) as *mut __m128i, r[3]);
-                _mm_storeu_si128(buffer.offset(64) as *mut __m128i, r[4]);
-                _mm_storeu_si128(buffer.offset(80) as *mut __m128i, r[5]);
-                _mm_storeu_si128(buffer.offset(96) as *mut __m128i, r[6]);
-                _mm_storeu_si128(buffer.offset(112) as *mut __m128i, r[7]);
+                r[0].store(buffer.offset(0));
+                r[1].store(buffer.offset(16));
+                r[2].store(buffer.offset(32));
+                r[3].store(buffer.offset(48));
+                r[4].store(buffer.offset(64));
+                r[5].store(buffer.offset(80));
+                r[6].store(buffer.offset(96));
+                r[7].store(buffer.offset(112));
                 buffer = buffer.offset(128);
             }
             remaining -= 128;
         }
         while remaining > 32 {
-            c[1] = unsafe { _mm_add_epi64(c[0], one) };
+            c[1] = c[0] + one;
             compute_rounds!(0, c, r, s, self.round_keys);
             compute_rounds!(1, c, r, s, self.round_keys);
+            c[0] = c[1] + one;
             unsafe {
-                c[0] = _mm_add_epi64(c[1], one);
-                _mm_storeu_si128(buffer.offset(0) as *mut __m128i, r[0]);
-                _mm_storeu_si128(buffer.offset(16) as *mut __m128i, r[1]);
+                r[0].store(buffer.offset(0));
+                r[1].store(buffer.offset(16));
                 buffer = buffer.offset(32);
             }
             remaining -= 32;
         }
         while remaining > 16 {
             compute_rounds!(0, c, r, s, self.round_keys);
+            c[0] = c[0] + one;
             unsafe {
-                c[0] = _mm_add_epi64(c[0], one);
-                _mm_storeu_si128(buffer as *mut __m128i, r[0]);
+                r[0].store(buffer);
                 buffer = buffer.offset(16);
             }
             remaining -= 16;
         }
         if remaining > 0 {
             compute_rounds!(0, c, r, s, self.round_keys);
+            c[0] = c[0] + one;
             unsafe {
                 #[repr(align(16))]
                 let mut t: [u8; 16] = std::mem::uninitialized();
                 let t = t.as_mut_ptr();
-                c[0] = _mm_add_epi64(c[0], one);
-                _mm_storeu_si128(t as *mut __m128i, r[0]);
+                r[0].store(t);
                 for i in 0..remaining {
                     buffer.add(i).write(t.add(i).read());
                 }
@@ -225,7 +219,7 @@ impl AesCore {
         }
         self.counter = c[0];
 
-        c[0] = unsafe { _mm_xor_si128(c[0], _mm_set_epi64x(1 << 63, 0)) };
+        c[0] = c[0] ^ M128::from((1 << 63, 0));
         compute_rounds!(0, c, r, s, self.round_keys);
         aes_key_expand_128(&mut self.round_keys, r[0]);
     }
@@ -236,16 +230,16 @@ impl SeedableRng for AesCore {
 
     /// Create a new `AesCore` using the given seed.
     fn from_seed(seed: [u8; SEEDBYTES]) -> AesCore {
-        let zero = unsafe { _mm_set_epi64x(0, 0) };
+        let zero = M128::from((0, 0));
         let mut round_keys: RoundKeys = [zero; ROUNDS + 1];
-        let key = seed.as_ptr() as *const __m128i;
-        let counter = unsafe { seed.as_ptr().offset(16) } as *const __m128i;
+        let key = unsafe { M128::load(seed.as_ptr()) };
+        let counter = unsafe { M128::load(seed.as_ptr().offset(16)) };
 
-        aes_key_expand_128(&mut round_keys, unsafe { _mm_loadu_si128(key) });
+        aes_key_expand_128(&mut round_keys, key);
 
         AesCore {
             round_keys,
-            counter: unsafe { _mm_loadu_si128(counter) },
+            counter,
         }
     }
 }
@@ -314,7 +308,7 @@ impl CryptoRng for AesRng {}
 
 #[cfg(test)]
 mod tests {
-    use std::simd::u8x16;
+    use std::simd::{FromBits, u8x16};
     extern crate itertools;
 
     use self::itertools::Itertools;
@@ -334,8 +328,8 @@ mod tests {
         ]);
         {
             let mut hex = String::new();
-            for key in rng.round_keys.iter() {
-                let v = unsafe { std::mem::transmute::<__m128i, u8x16>(*key) };
+            for &key in rng.round_keys.iter() {
+                let v = u8x16::from_bits(key.0);
                 for i in 0..16 {
                     hex.push_str(&format!("{:02x}", v.extract(i)));
                 }
@@ -345,7 +339,7 @@ mod tests {
         }
         {
             let mut hex = String::new();
-            let v = unsafe { std::mem::transmute::<__m128i, u8x16>(rng.counter) };
+            let v = u8x16::from_bits(rng.counter.0);
             for i in 0..16 {
                 hex.push_str(&format!("{:02x}", v.extract(i)));
             }
