@@ -17,6 +17,7 @@ It was ported from a [C implementation](https://github.com/jedisct1/aes-stream).
 [![Build Status]][travis]
 
 [Build Status]: https://travis-ci.org/vks/aesrng.svg?branch=master
+[travis]: https://travis-ci.org/vks/aesrng
 
 
 ## Compilation
