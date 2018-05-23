@@ -1,6 +1,8 @@
 language: rust
 rust:
-  - stable
+#  - stable
+#  - 1.27.0
+# 1.27 is not released yet
   - beta
   - nightly
 
@@ -13,6 +15,9 @@ addons:
     packages:
       - gcc-multilib
 
-script:
-  - cargo build --verbose
-  - cargo test --verbose
+matrix:
+  allow_failures:
+    - rust: nightly
+  fast_finish: true
+
+cache: cargo
