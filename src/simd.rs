@@ -20,6 +20,18 @@ impl M128 {
         _mm_storeu_si128(mem_addr as *mut __m128i, self.0);
     }
 
+    #[allow(unused)]  // Only used in tests.
+    #[inline]
+    pub fn bytes(&self) -> [u8; 16] {
+        unsafe {
+            #[repr(align(16))]
+            struct Aligned([u8; 16]);
+            let mut buf: Aligned = ::std::mem::uninitialized();
+            self.store(buf.0.as_mut_ptr());
+            buf.0
+        }
+    }
+
     #[inline]
     pub fn encrypt(self, round_key: M128) -> M128 {
         unsafe { M128(_mm_aesenc_si128(self.0, round_key.0)) }

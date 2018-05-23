@@ -11,10 +11,6 @@
 //! When using this crate do not forget to enable `aes` target feature,
 //! otherwise you will get an empty crate. You can do it either by using
 //! `RUSTFLAGS="-C target-feature=+aes"` or by editing your `.cargo/config`.
-//!
-//! This crate currently requires nigthly Rust compiler due to the
-//! usage of the unstable `stdsimd` feature.
-#![feature(stdsimd)]
 #![cfg(any(target_arch = "x86_64", target_arch = "x86"))]
 #![cfg(target_feature = "aes")]
 
@@ -273,7 +269,6 @@ impl CryptoRng for AesRng {}
 
 #[cfg(test)]
 mod tests {
-    use std::simd::{FromBits, u8x16};
     extern crate itertools;
 
     use self::itertools::Itertools;
@@ -294,20 +289,15 @@ mod tests {
         {
             let mut hex = String::new();
             for &key in rng.round_keys.iter() {
-                let v = u8x16::from_bits(key.0);
-                for i in 0..16 {
-                    hex.push_str(&format!("{:02x}", v.extract(i)));
-                }
+                let buf = key.bytes();
+                hex.push_str(&format!("{:02x}", buf.iter().format("")));
             }
             let expected = "000102030405060708090a0b0c0d0e0fd6aa74fdd2af72fadaa678f1d6ab76feb692cf0b643dbdf1be9bc5006830b3feb6ff744ed2c2c9bf6c590cbf0469bf4147f7f7bc95353e03f96c32bcfd058dfd3caaa3e8a99f9deb50f3af57adf622aa5e390f7df7a69296a7553dc10aa31f6b14f9701ae35fe28c440adf4d4ea9c02647438735a41c65b9e016baf4aebf7ad2549932d1f08557681093ed9cbe2c974e13111d7fe3944a17f307a78b4d2b30c5";
             assert_eq!(hex, expected);
         }
         {
-            let mut hex = String::new();
-            let v = u8x16::from_bits(rng.counter.0);
-            for i in 0..16 {
-                hex.push_str(&format!("{:02x}", v.extract(i)));
-            }
+            let buf = rng.counter.bytes();
+            let hex = format!("{:02x}", buf.iter().format(""));
             let expected = "000102030405060708090a0b0c0d0e0f";
             assert_eq!(hex, expected);
         }
