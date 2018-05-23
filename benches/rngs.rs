@@ -5,7 +5,7 @@ extern crate xoroshiro;
 #[macro_use]
 extern crate criterion;
 
-use rand::{RngCore, NewRng, SeedableRng};
+use rand::{RngCore, FromEntropy, SeedableRng};
 use criterion::{Criterion, Fun};
 
 fn fill(c: &mut Criterion) {
@@ -38,7 +38,7 @@ fn fill(c: &mut Criterion) {
         };
     */
     let fill_std = {
-        let mut rng = rand::StdRng::new();
+        let mut rng = rand::StdRng::from_entropy();
         let mut buf = vec![0; BUF_SIZE];
 
         Fun::new("std", move |b, _| b.iter(|| rng.fill_bytes(&mut buf)))
@@ -62,7 +62,7 @@ fn next_u64(c: &mut Criterion) {
         };
     */
     let next_std = {
-        let mut rng = rand::StdRng::new();
+        let mut rng = rand::StdRng::from_entropy();
         Fun::new("std", move |b, _| b.iter(|| rng.next_u64()))
     };
     c.bench_functions("next_u64", vec![next_aes, /*next_xoroshiro,*/ next_std], ());
@@ -80,7 +80,10 @@ fn new(c: &mut Criterion) {
     /*
     let new_xoroshiro = Fun::new("xoroshiro", |b, _| b.iter(|| xoroshiro::rng::XoroShiro128::new_unseeded()));
     */
-    let new_std = Fun::new("std", |b, _| b.iter(|| rand::StdRng::new()));
+    let new_std = Fun::new("std", |b, _| b.iter(|| rand::StdRng::from_seed([
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            11, 12, 13, 14, 15,
+        ])));
     c.bench_functions("new", vec![new_aes, new_aescore, /*new_xoroshiro,*/ new_std], ());
 }
 
