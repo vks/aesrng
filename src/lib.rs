@@ -13,9 +13,7 @@
 //! `RUSTFLAGS="-C target-feature=+aes"` or by editing your `.cargo/config`.
 //!
 //! This crate currently requires nigthly Rust compiler due to the
-//! usage of unstable `cfg_target_feature` and `stdsimd` features.
-#![feature(cfg_target_feature)]
-#![feature(target_feature)]
+//! usage of the unstable `stdsimd` feature.
 #![feature(stdsimd)]
 #![cfg(any(target_arch = "x86_64", target_arch = "x86"))]
 #![cfg(target_feature = "aes")]
@@ -24,8 +22,8 @@ extern crate rand_core;
 
 use std::fmt;
 
-use rand_core::{BlockRngCore, CryptoRng, RngCore, SeedableRng, Error};
-use rand_core::impls::BlockRng;
+use rand_core::{CryptoRng, RngCore, SeedableRng, Error};
+use rand_core::block::{BlockRngCore, BlockRng};
 
 mod byte_slice;
 #[macro_use]
@@ -162,8 +160,9 @@ impl AesCore {
             c[0] = c[0] + one;
             unsafe {
                 #[repr(align(16))]
-                let mut t: [u8; 16] = std::mem::uninitialized();
-                let t = t.as_mut_ptr();
+                struct Aligned([u8; 16]);
+                let mut t: Aligned = std::mem::uninitialized();
+                let t = t.0.as_mut_ptr();
                 r[0].store(t);
                 for i in 0..remaining {
                     buffer.add(i).write(t.add(i).read());
