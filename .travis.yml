@@ -1,0 +1,18 @@
+language: rust
+rust:
+  - stable
+  - beta
+  - nightly
+
+env:
+  - ARCH=x86_64 RUSTFLAGS='-C target-feature=+aes -C target-cpu=native'
+  - ARCH=i686 RUSTFLAGS='-C target-feature=+aes -C target-cpu=native'
+
+addons:
+  apt:
+    packages:
+      - gcc-multilib
+
+script:
+  - cargo build --verbose
+  - cargo test --verbose
