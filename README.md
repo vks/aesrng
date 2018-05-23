@@ -24,8 +24,6 @@ instructions, the following flags are recommended:
 RUSTFLAGS='-C target-feature=+aes -C target-cpu=native'
 ```
 
-This only works with a nightly version of Rust.
-
 
 ## Performance
 
