@@ -1,8 +1,7 @@
 language: rust
 rust:
-#  - stable
-#  - 1.27.0
-# 1.27 is not released yet
+  - stable
+  - 1.27.0
   - beta
   - nightly
 
