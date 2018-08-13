@@ -18,5 +18,5 @@ rand_core = "0.2"
 [dev-dependencies]
 criterion = "0.2"
 itertools = "0.7"
-xoroshiro = "0.2"
+xoshiro = "0.0.3"
 rand = "0.5"
