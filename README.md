@@ -29,7 +29,7 @@ instructions, the following flags are recommended:
 RUSTFLAGS='-C target-feature=+aes -C target-cpu=native'
 ```
 
-This requires Rust 1.27 or greater.
+This requires Rust 1.36 or greater.
 
 ## Performance
 
