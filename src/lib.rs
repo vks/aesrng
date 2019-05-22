@@ -17,6 +17,7 @@
 extern crate rand_core;
 
 use std::fmt;
+use std::mem::MaybeUninit;
 
 use rand_core::{CryptoRng, RngCore, SeedableRng, Error};
 use rand_core::block::{BlockRngCore, BlockRng};
@@ -157,11 +158,10 @@ impl AesCore {
             unsafe {
                 #[repr(align(16))]
                 struct Aligned([u8; 16]);
-                let mut t: Aligned = std::mem::uninitialized();
-                let t = t.0.as_mut_ptr();
-                r[0].store(t);
+                let mut t = MaybeUninit::<Aligned>::uninit();
+                r[0].store(t.as_mut_ptr() as *mut u8);
                 for i in 0..remaining {
-                    buffer.add(i).write(t.add(i).read());
+                    buffer.add(i).write((t.as_ptr() as *const u8).add(i).read());
                 }
             }
         }

@@ -26,9 +26,9 @@ impl M128 {
         unsafe {
             #[repr(align(16))]
             struct Aligned([u8; 16]);
-            let mut buf: Aligned = ::std::mem::uninitialized();
-            self.store(buf.0.as_mut_ptr());
-            buf.0
+            let mut buf = ::std::mem::MaybeUninit::<Aligned>::uninit();
+            self.store(buf.as_mut_ptr() as *mut u8);
+            buf.assume_init().0
         }
     }
 
